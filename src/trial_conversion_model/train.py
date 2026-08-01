@@ -5,7 +5,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 from xgboost import XGBClassifier
 
-from beam_trial.data import load_raw, split_features_target
+from trial_conversion_model.data import load_raw, split_features_target
 
 MODEL_DIR = Path("models")
 TEST_SIZE = 0.25
