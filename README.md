@@ -10,7 +10,7 @@ Install the dependencies and the package:
 uv sync
 ```
 
-The training data is not committed to the repository. Copy `.env.example` to `.env` and fill in the database password from the course's Tools & Setup lesson, then materialize the extract:
+The training data is not committed to the repository. Copy `.env.example` to `.env` and replace the password placeholder with the one from the course's Tools & Setup lesson, then materialize the extract:
 
 ```
 uv run scripts/fetch_data.py

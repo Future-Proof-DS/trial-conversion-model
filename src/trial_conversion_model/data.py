@@ -9,22 +9,18 @@ RAW_DATA = Path("data/01_raw/trial_snapshot.csv")
 PROCESSED_DATA = Path("data/03_processed/training_data.csv")
 
 QUERY = "SELECT * FROM ml.trial_snapshot_latest"
-DB_HOST = "dpg-d35pib0dl3ps7394mc4g-a.oregon-postgres.render.com"
-DB_NAME = "beam_neb0"
-DB_USER = "students"
 
 
 def fetch(out_path: Path = RAW_DATA) -> None:
     """Materialize the training extract into data/01_raw.
 
     Training always runs from this file, never from the live table, so the
-    training data cannot shift between runs.
+    training data cannot shift between runs. The connection string comes
+    entirely from the environment; code never knows which database it is
+    pointed at.
     """
     load_dotenv()
-    password = os.environ["BEAM_DB_PASSWORD"]
-    engine = create_engine(
-        f"postgresql://{DB_USER}:{password}@{DB_HOST}:5432/{DB_NAME}"
-    )
+    engine = create_engine(os.environ["DATABASE_URL"])
     df = pd.read_sql(QUERY, engine)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_path, index=False)
