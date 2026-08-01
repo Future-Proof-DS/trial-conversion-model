@@ -2,3 +2,5 @@
 # project data and artifacts stay local
 data/
 models/
+
+.env
