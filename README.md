@@ -32,5 +32,6 @@ This builds the processed training table from the raw extract, trains the model,
 - `scripts/`: thin entry points that call into the package (`fetch_data.py` materializes the extract, `train.py` builds the training table and trains). Production runs these; the logic stays importable and testable in `src/`.
 - `notebooks/`: exploration only. Notebooks import from the package; no pipeline logic lives here.
 - `data/01_raw/`: the immutable extract as pulled from the database (never committed, never modified).
-- `data/03_processed/`: the model-ready training table written by the pipeline (never committed; `02_interim` is reserved for multi-step pipelines this project does not need).
+- `data/02_interim/`: reserved for intermediate outputs in multi-step pipelines; this project goes straight from raw to processed, so it stays empty.
+- `data/03_processed/`: the model-ready training table written by the pipeline (never committed).
 - `models/`: trained model artifacts and metrics (not committed).
