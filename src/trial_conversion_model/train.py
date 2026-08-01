@@ -5,7 +5,8 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 from xgboost import XGBClassifier
 
-from trial_conversion_model.data import load_raw, split_features_target
+from trial_conversion_model.data import load_processed
+from trial_conversion_model.features import TARGET
 
 MODEL_DIR = Path("models")
 TEST_SIZE = 0.25
@@ -13,8 +14,10 @@ RANDOM_STATE = 42
 
 
 def train(model_dir: Path = MODEL_DIR) -> dict:
-    """Train the trial conversion model and save the model and its metrics."""
-    X, y = split_features_target(load_raw())
+    """Train the trial conversion model from the processed training table."""
+    table = load_processed()
+    X = table.drop(columns=[TARGET])
+    y = table[TARGET]
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=TEST_SIZE, stratify=y, random_state=RANDOM_STATE
     )
