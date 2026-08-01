@@ -28,7 +28,7 @@ This builds the processed training table from the raw extract, trains the model,
 
 ## Layout
 
-- `src/trial_conversion_model/`: the package. `data.py` loads the pipeline's inputs; `features.py` derives the model features from the snapshot's base aggregates and writes the processed training table; `train.py` trains, evaluates, and saves the model.
+- `src/trial_conversion_model/`: the package. `data.py` acquires the extract from the database and loads the pipeline's inputs; `features.py` derives the model features from the snapshot's base aggregates and writes the processed training table; `train.py` trains, evaluates, and saves the model.
 - `scripts/`: thin entry points that call into the package (`fetch_data.py` materializes the extract, `train.py` builds the training table and trains). Production runs these; the logic stays importable and testable in `src/`.
 - `notebooks/`: exploration only. Notebooks import from the package; no pipeline logic lives here.
 - `data/01_raw/`: the immutable extract as pulled from the database (never committed, never modified).
