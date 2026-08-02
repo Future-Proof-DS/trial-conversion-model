@@ -8,11 +8,13 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "fastapi>=0.141.1",
     "pandas>=3.0.5",
     "psycopg2-binary>=2.9.12",
     "python-dotenv>=1.2.2",
     "scikit-learn>=1.9.0",
     "sqlalchemy>=2.0.51",
+    "uvicorn[standard]>=0.52.1",
     "xgboost>=3.2.0",
 ]
 
@@ -23,7 +25,9 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "jupyter>=1.1.1",
     "matplotlib>=3.11.1",
+    "pytest>=9.1.1",
     "ruff>=0.13.0",
 ]
