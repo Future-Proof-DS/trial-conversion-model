@@ -1,0 +1,9 @@
+.venv/
+.git/
+.env
+data/
+notebooks/
+__pycache__/
+*.pyc
+.DS_Store
+models/metrics.json
