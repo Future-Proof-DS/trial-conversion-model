@@ -21,4 +21,4 @@ RUN uv sync --frozen --no-dev
 COPY models/model.json models/model.json
 
 EXPOSE 8000
-CMD ["uv", "run", "--no-sync", "uvicorn", "trial_conversion_model.api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "--no-sync", "uvicorn", "trial_conversion_model.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -31,7 +31,7 @@ This builds the processed training table from the raw extract, trains the model,
 The model is served over HTTP so the teams that need scores can get them on demand. Run the service locally:
 
 ```
-uv run uvicorn trial_conversion_model.api:app --reload
+uv run uvicorn trial_conversion_model.api.main:app --reload
 ```
 
 Or build and run it as a container, which is how it ships:
@@ -41,11 +41,11 @@ docker build -t trial-conversion-model .
 docker run -p 8000:8000 trial-conversion-model
 ```
 
-`POST /predict` takes one trial's first-3-day base aggregates and returns its conversion probability; `GET /health` reports service status. Interactive docs live at `/docs` while the service runs.
+`POST /predict` takes one trial's first-3-day base aggregates and returns its conversion probability plus a low/medium/high band; `GET /health` reports service status. Interactive docs live at `/docs` while the service runs.
 
 ## Layout
 
-- `src/trial_conversion_model/`: the package. `data.py` acquires the extract from the database and loads the pipeline's inputs; `features.py` derives the model features from the snapshot's base aggregates and writes the processed training table; `train.py` trains, evaluates, and saves the model; `predict.py` scores one trial from its base aggregates; `api.py` is the FastAPI service that exposes predictions over HTTP.
+- `src/trial_conversion_model/`: the package. `data.py` acquires the extract from the database and loads the pipeline's inputs; `features.py` derives the model features from the snapshot's base aggregates and writes the processed training table; `train.py` trains, evaluates, and saves the model; `predict.py` scores trials from their base aggregates; `api/` is the FastAPI service (`main.py` builds the app, `routes.py` holds the endpoints, `schemas.py` defines the request and response shapes).
 - `scripts/`: thin entry points that call into the package (`fetch_data.py` materializes the extract, `train.py` builds the training table and trains). Production runs these; the logic stays importable and testable in `src/`.
 - `notebooks/`: exploration only. Notebooks import from the package; no pipeline logic lives here.
 - `data/01_raw/`: the immutable extract as pulled from the database (never committed, never modified).

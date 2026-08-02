@@ -15,15 +15,15 @@ def load_model(path: Path = MODEL_PATH) -> XGBClassifier:
     return model
 
 
-def predict_proba(model: XGBClassifier, aggregates: dict) -> float:
-    """Score one trial from its base aggregates.
+def predict_proba(model: XGBClassifier, aggregates: pd.DataFrame) -> pd.Series:
+    """Score trials from their base aggregates; one probability per row.
 
-    The row goes through the same add_features as training. A single row
-    can only carry one country and one device, so its dummy columns are
+    The rows go through the same add_features as training. A small batch
+    rarely carries every country and device, so the dummy columns are
     reindexed against the model's training columns; the categories the
-    row does not have become explicit zeros.
+    batch does not have become explicit zeros.
     """
-    df = add_features(pd.DataFrame([aggregates]))
-    row = pd.get_dummies(df[FEATURES], columns=CATEGORICAL)
-    row = row.reindex(columns=model.get_booster().feature_names, fill_value=0)
-    return float(model.predict_proba(row)[0, 1])
+    df = add_features(aggregates)
+    rows = pd.get_dummies(df[FEATURES], columns=CATEGORICAL)
+    rows = rows.reindex(columns=model.get_booster().feature_names, fill_value=0)
+    return pd.Series(model.predict_proba(rows)[:, 1], index=aggregates.index)
