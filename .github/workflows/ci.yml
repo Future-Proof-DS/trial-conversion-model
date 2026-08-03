@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      # The model artifact is not in git; the service cannot exist without
+      # it. CI pulls the published model from S3, exactly like production
+      # will, BEFORE the tests run (the API loads the model at import).
+      - name: Pull the published model from S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: eu-north-1
+        run: >
+          uv run python -c "import boto3;
+          boto3.client('s3').download_file(
+          'trial-conversion-artifacts-andres',
+          'models/model.json', 'models/model.json')"
+
+      - name: Test
+        run: uv run pytest
+
+      - name: Build the service image
+        run: docker build -t trial-conversion-model:${{ github.sha }} .
