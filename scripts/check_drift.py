@@ -10,6 +10,8 @@ from trial_conversion_model.monitoring import (
 )
 
 if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        sys.exit("usage: uv run scripts/check_drift.py <cohort file>")
     cohort_path = Path(sys.argv[1])
     current = pd.read_parquet(cohort_path)
     snapshot = run_drift_check(current, load_reference())
