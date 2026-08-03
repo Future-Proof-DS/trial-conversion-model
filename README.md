@@ -49,11 +49,22 @@ docker run -p 8000:8000 trial-conversion-model
 uv run pytest
 ```
 
+## Monitor
+
+Labels for a live trial arrive 11+ days after the prediction, so input drift is the earliest signal that the world has shifted under the model. The service logs every scored request to `logs/predictions.jsonl`, and the drift check compares a current cohort file against the training extract:
+
+```
+uv run scripts/check_drift.py <cohort file>
+```
+
+This writes an HTML report (for eyes) and a JSON verdict (for machines) to `monitoring/` and to the S3 bucket, and prints OK or DRIFT.
+
 ## Layout
 
 - `src/trial_conversion_model/`: the package. `data.py` acquires the extract from the database and loads the pipeline's inputs; `features.py` derives the model features from the snapshot's base aggregates and writes the processed training table; `train.py` trains, evaluates, and saves the model; `predict.py` scores trials from their base aggregates; `api/` is the FastAPI service (`main.py` builds the app, `routes.py` holds the endpoints, `schemas.py` defines the request and response shapes).
 - `scripts/`: thin entry points that call into the package (`fetch_data.py` materializes the extract, `train.py` builds the training table and trains). Production runs these; the logic stays importable and testable in `src/`.
 - `tests/`: pytest checks for the feature logic and the API contract.
+- `monitoring.py` (in the package): the drift check; `scripts/check_drift.py` runs it against a cohort file.
 - `notebooks/`: exploration only. Notebooks import from the package; no pipeline logic lives here.
 - `data/01_raw/`: the immutable extract as pulled from the database (never committed, never modified).
 - `data/02_interim/`: reserved for intermediate outputs in multi-step pipelines; this project goes straight from raw to processed, so it stays empty.
