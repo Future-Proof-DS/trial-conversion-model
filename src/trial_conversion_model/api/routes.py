@@ -1,4 +1,7 @@
+import json
 import logging
+from datetime import UTC, datetime
+from pathlib import Path
 
 import pandas as pd
 from fastapi import APIRouter
@@ -12,6 +15,26 @@ router = APIRouter()
 
 # Load the model once, when the service starts, not on every request.
 model = load_model()
+
+PREDICTION_LOG = Path("logs/predictions.jsonl")
+
+
+def log_prediction(features: dict, probability: float, band: str) -> None:
+    """Append one scored request to the prediction log, one JSON per line.
+
+    The human-readable log line is for debugging; this file is for
+    machines: monitoring reads it to see what the model has been asked
+    and what it answered.
+    """
+    PREDICTION_LOG.parent.mkdir(exist_ok=True)
+    record = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        **features,
+        "conversion_probability": probability,
+        "conversion_band": band,
+    }
+    with PREDICTION_LOG.open("a") as f:
+        f.write(json.dumps(record) + "\n")
 
 
 def to_band(probability: float) -> str:
@@ -40,4 +63,5 @@ def predict(request: PredictionRequest) -> PredictionResponse:
         probability,
         band,
     )
+    log_prediction(request.model_dump(), probability, band)
     return PredictionResponse(conversion_probability=probability, conversion_band=band)
