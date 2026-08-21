@@ -54,19 +54,39 @@ uv run pytest
 Labels for a live trial arrive 11+ days after the prediction, so input drift is the earliest signal that the world has shifted under the model. The service logs every scored request to `logs/predictions.jsonl`, and the drift check compares a current cohort file against the training extract:
 
 ```
-uv run scripts/check_drift.py <cohort file>
+uv run scripts/check_drift.py [cohort file]
 ```
 
-This writes an HTML report (for eyes) and a JSON verdict (for machines) to `monitoring/` and to the S3 bucket, and prints OK or DRIFT.
+This writes an HTML report (for eyes) and a JSON verdict (for machines) to `monitoring/` and to the S3 bucket, and prints OK or DRIFT. With no argument it checks the newest pulled cohort, which is the form the daily cron job uses; on a DRIFT verdict it posts an alert to the Slack webhook in `SLACK_WEBHOOK_URL`.
+
+## Score
+
+The lifecycle team's daily ranked list. A new day-3 cohort file lands in the course's public bucket every day; scoring pulls the newest one, runs it through the same `predict` the API serves, and writes the trials ranked by conversion probability to `data/04_predictions/` and to the S3 bucket:
+
+```
+uv run scripts/score.py
+```
+
+On the server, cron runs this and the drift check daily; nothing about either script knows whether a human or a schedule invoked it.
+
+## Dashboard
+
+One screen for the whole system, read from S3: the latest scored cohort, the latest drift verdict, and the model's metrics.
+
+```
+uv run streamlit run dashboard.py
+```
 
 ## Layout
 
-- `src/trial_conversion_model/`: the package. `data.py` acquires the extract from the database and loads the pipeline's inputs; `features.py` derives the model features from the snapshot's base aggregates and writes the processed training table; `train.py` trains, evaluates, and saves the model; `predict.py` scores trials from their base aggregates; `api/` is the FastAPI service (`main.py` builds the app, `routes.py` holds the endpoints, `schemas.py` defines the request and response shapes).
-- `scripts/`: thin entry points that call into the package (`fetch_data.py` materializes the extract, `train.py` builds the training table and trains). Production runs these; the logic stays importable and testable in `src/`.
+- `src/trial_conversion_model/`: the package. `data.py` acquires the extract from the database and loads the pipeline's inputs; `features.py` derives the model features from the snapshot's base aggregates and writes the processed training table; `train.py` trains, evaluates, and saves the model; `predict.py` scores trials from their base aggregates; `cohorts.py` pulls day-3 cohort files from the course's public bucket; `api/` is the FastAPI service (`main.py` builds the app, `routes.py` holds the endpoints, `schemas.py` defines the request and response shapes).
+- `scripts/`: thin entry points that call into the package (`fetch_data.py` materializes the extract, `train.py` builds the training table and trains, `score.py` scores the newest cohort, `check_drift.py` runs the drift check). Production runs these; the logic stays importable and testable in `src/`.
 - `tests/`: pytest checks for the feature logic and the API contract.
 - `monitoring.py` (in the package): the drift check; `scripts/check_drift.py` runs it against a cohort file.
+- `dashboard.py`: the Streamlit dashboard; a reader of what the scheduled jobs produced, never a computer of anything itself.
 - `notebooks/`: exploration only. Notebooks import from the package; no pipeline logic lives here.
-- `data/01_raw/`: the immutable extract as pulled from the database (never committed, never modified).
+- `data/01_raw/`: the immutable extract as pulled from the database, and under `cohorts/` the day-3 cohort files pulled from the course bucket (never committed, never modified).
 - `data/02_interim/`: reserved for intermediate outputs in multi-step pipelines; this project goes straight from raw to processed, so it stays empty.
 - `data/03_processed/`: the model-ready training table written by the pipeline (never committed).
+- `data/04_predictions/`: the scored, ranked cohort lists written by `scripts/score.py` (never committed).
 - `models/`: trained model artifacts and metrics (not committed).
