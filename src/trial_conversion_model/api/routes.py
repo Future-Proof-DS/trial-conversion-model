@@ -48,7 +48,7 @@ def to_band(probability: float) -> str:
 
 @router.get("/health")
 def health() -> dict:
-    return {"status": "ok", "version": "0.2.0"}
+    return {"status": "ok", "version": "0.3.0"}
 
 
 @router.post("/predict", response_model=PredictionResponse)
