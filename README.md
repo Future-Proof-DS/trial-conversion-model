@@ -61,7 +61,7 @@ This writes an HTML report (for eyes) and a JSON verdict (for machines) to `moni
 
 ## Score
 
-The lifecycle team's daily ranked list. A new day-3 cohort file lands in the course's public bucket every day; scoring pulls the newest one, runs it through the same `predict` the API serves, and writes the trials ranked by conversion probability to `data/04_predictions/` and to the S3 bucket:
+The lifecycle team's daily ranked list. A new day-3 cohort file lands in the course's public bucket every day; scoring pulls the newest one, runs it through the same `predict` the API serves, and writes the trials ranked by conversion probability, least likely to convert first, to `data/04_predictions/` and to the S3 bucket:
 
 ```
 uv run scripts/score.py
