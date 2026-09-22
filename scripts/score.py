@@ -15,10 +15,11 @@ if __name__ == "__main__":
     cohort_path = pull_newest_cohort()
     cohort = pd.read_parquet(cohort_path)
 
-    # The lifecycle team's daily ranked list: highest probability first,
-    # scored by the same predict function the API serves.
+    # The lifecycle team's daily ranked list: the trials most likely to
+    # cancel first, because those are the ones the nurture flow targets.
+    # Scored by the same predict function the API serves.
     scored = cohort.assign(conversion_probability=predict_proba(load_model(), cohort))
-    scored = scored.sort_values("conversion_probability", ascending=False)
+    scored = scored.sort_values("conversion_probability", ascending=True)
 
     PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
     out_path = (
