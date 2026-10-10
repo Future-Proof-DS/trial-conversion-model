@@ -69,6 +69,16 @@ uv run scripts/score.py
 
 On the server, cron runs this and the drift check daily; nothing about either script knows whether a human or a schedule invoked it.
 
+## Backfill
+
+A one-time fill for the dashboard. The bucket only holds the runs you started yourself, so this writes about a month of scored cohorts and clean drift verdicts into it, dated before your first real run, so the dashboard has a history behind it:
+
+```
+uv run scripts/backfill.py
+```
+
+It generates the cohorts itself and reads nothing from the course bucket. It is not part of the system and never runs on a schedule; the daily jobs are the score and drift scripts above.
+
 ## Dashboard
 
 One screen for the whole system, read from S3: the latest scored cohort, the latest drift verdict, and the model's metrics.
@@ -80,7 +90,7 @@ uv run streamlit run dashboard.py
 ## Layout
 
 - `src/trial_conversion_model/`: the package. `data.py` acquires the extract from the database and loads the pipeline's inputs; `features.py` derives the model features from the snapshot's base aggregates and writes the processed training table; `train.py` trains, evaluates, and saves the model; `predict.py` scores trials from their base aggregates; `cohorts.py` pulls day-3 cohort files from the course's public bucket; `api/` is the FastAPI service (`main.py` builds the app, `routes.py` holds the endpoints, `schemas.py` defines the request and response shapes).
-- `scripts/`: thin entry points that call into the package (`fetch_data.py` materializes the extract, `train.py` builds the training table and trains, `score.py` scores the newest cohort, `check_drift.py` runs the drift check). Production runs these; the logic stays importable and testable in `src/`.
+- `scripts/`: thin entry points that call into the package (`fetch_data.py` materializes the extract, `train.py` builds the training table and trains, `score.py` scores the newest cohort, `check_drift.py` runs the drift check, `backfill.py` fills in a month of history for the dashboard, once). Production runs these; the logic stays importable and testable in `src/`.
 - `tests/`: pytest checks for the feature logic and the API contract.
 - `monitoring.py` (in the package): the drift check; `scripts/check_drift.py` runs it against a cohort file.
 - `dashboard.py`: the Streamlit dashboard; a reader of what the scheduled jobs produced, never a computer of anything itself.
