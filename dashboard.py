@@ -74,10 +74,14 @@ def last_modified(key: str) -> datetime | None:
 scored_keys = [k for k in list_keys("predictions/") if k.endswith(".csv")][-60:]
 verdict_keys = [k for k in list_keys("monitoring/") if k.endswith(".json")]
 
-# One row per day. Days with no file are filled in as empty rows, so a missing
-# day is a gap in the line, not a point on it.
+# One row per day: the average probability and the middle half of the
+# cohort around it, because a model can answer differently without its
+# average moving. Days with no file are filled in as empty rows, so a
+# missing day is a gap in the chart, not a point on it.
 probabilities = [
-    pd.read_csv(io.BytesIO(read_object(k)), usecols=["conversion_probability"])
+    pd.read_csv(io.BytesIO(read_object(k)), usecols=["conversion_probability"])[
+        "conversion_probability"
+    ]
     for k in scored_keys
 ]
 by_day = pd.DataFrame(
@@ -85,7 +89,9 @@ by_day = pd.DataFrame(
         "day": pd.to_datetime(
             [Path(k).stem.removeprefix("scored_") for k in scored_keys]
         ),
-        "mean_probability": [p["conversion_probability"].mean() for p in probabilities],
+        "mean_probability": [p.mean() for p in probabilities],
+        "p25": [p.quantile(0.25) for p in probabilities],
+        "p75": [p.quantile(0.75) for p in probabilities],
         "trials": [len(p) for p in probabilities],
     }
 ).set_index("day")
@@ -118,13 +124,22 @@ st.title("Trial conversion model")
 # models/metrics.json, and the model file's date in S3.
 left, middle, right = st.columns(3)
 
+# Every tile has the same shape, label, value, pill, caption, so the row
+# lines up. The pill is a metric "delta" with its colour switched off: these
+# are facts, not trends, so no colour and no arrow.
 if latest is not None:
     latest_day = by_day.index[-1]
     # The course dates its cohorts in UTC, so the age is measured in UTC too.
     age = (datetime.now(UTC).date() - latest_day.date()).days
     when = {0: "today", 1: "yesterday"}.get(age, f"{age} days ago")
-    left.metric("Latest scored cohort", f"{latest_day:%Y-%m-%d}")
-    left.caption(f"{int(by_day['trials'].iloc[-1])} trials, scored {when}")
+    left.metric(
+        "Latest scored cohort",
+        f"{latest_day:%Y-%m-%d}",
+        f"scored {when}",
+        delta_color="off",
+        delta_arrow="off",
+    )
+    left.caption(f"{int(by_day['trials'].iloc[-1])} trials in the ranked list")
     if age >= STALE_AFTER_DAYS:
         left.warning(
             f"Nothing scored since {latest_day:%Y-%m-%d}. "
@@ -135,29 +150,34 @@ else:
 
 if not verdicts.empty:
     last = verdicts.iloc[-1]
-    label = "DRIFT" if last["drift"] else "OK"
     middle.metric(
         "Latest drift verdict",
-        label,
+        "DRIFT" if last["drift"] else "OK",
         f"{last['drifted_share']:.0%} of features",
         delta_color="off",
+        delta_arrow="off",
     )
     # When drift last fired is the first thing anyone asks after "is it OK".
     fired = verdicts.index[verdicts["drift"].eq(True)]
     middle.caption(
-        f"last DRIFT on {fired[-1]:%Y-%m-%d}" if len(fired) else "no DRIFT so far"
+        f"last DRIFT on {fired[-1]:%Y-%m-%d}"
+        if len(fired)
+        else f"no DRIFT in the last {len(verdicts)} days"
     )
 else:
     middle.metric("Latest drift verdict", "none yet")
 
 if METRICS_PATH.exists():
     metrics = json.loads(METRICS_PATH.read_text())
-    right.metric("Model test AUC", f"{metrics['test_auc']:.4f}")
     published = last_modified(MODEL_KEY)
-    right.caption(
-        f"trained on {metrics['n_train']} trials"
-        + (f", published {published:%Y-%m-%d}" if published else "")
+    right.metric(
+        "Model test AUC",
+        f"{metrics['test_auc']:.4f}",
+        f"published {published:%Y-%m-%d}" if published else "not in S3",
+        delta_color="off",
+        delta_arrow="off",
     )
+    right.caption(f"trained on {metrics['n_train']} trials")
 else:
     right.metric("Model test AUC", "no local model")
 
@@ -169,10 +189,32 @@ predictions_col, drift_col = st.columns(2)
 with predictions_col:
     st.subheader("Predictions over time")
     if not by_day.empty:
-        st.line_chart(by_day["mean_probability"], y_label="conversion probability")
+        days = by_day.reset_index()
+        # The band is where the middle half of each day's trials landed; the
+        # line is the average. The whole band moving is what prediction drift
+        # looks like.
+        band = (
+            alt.Chart(days)
+            .mark_area(opacity=0.2)
+            .encode(x=alt.X("day:T", title=None), y="p25:Q", y2="p75:Q")
+        )
+        mean = (
+            alt.Chart(days)
+            .mark_line()
+            .encode(
+                x="day:T",
+                y=alt.Y(
+                    "mean_probability:Q",
+                    title="conversion probability",
+                    scale=alt.Scale(domain=[0, 1]),
+                ),
+            )
+        )
+        st.altair_chart(band + mean, width="stretch")
         st.caption(
-            "Average conversion probability of each day's cohort. "
-            "A move here means the model is answering differently."
+            "Average conversion probability of each day's cohort, with the band "
+            "holding the middle half of its trials. A move here means the model "
+            "is answering differently."
         )
     else:
         st.write("No scored cohorts in S3 yet. The daily score job writes them.")
