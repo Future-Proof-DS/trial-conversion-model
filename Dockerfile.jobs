@@ -13,8 +13,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
 
 # Dependencies first, so code changes do not re-install the world.
-# The dev group comes along because the drift library lives there,
-# which is cheaper than a group of its own.
+# The dev group is where the drift library lives, so it comes along.
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-install-project
 
