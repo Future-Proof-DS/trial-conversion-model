@@ -4,14 +4,21 @@ Run locally with: uv run streamlit run dashboard.py
 
 The dashboard is a reader, not a component: it displays what the
 scheduled jobs produced (scored cohorts under predictions/, drift
-verdicts under monitoring/) and never computes anything itself.
+verdicts under monitoring/, the model under models/) and never computes
+anything itself.
+
+It answers three questions, top to bottom: is the system alive and what
+is it running, has anything moved over the past month, and what did the
+lifecycle team receive today.
 """
 
 import io
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
+import altair as alt
 import boto3
 import pandas as pd
 import streamlit as st
@@ -19,7 +26,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 BUCKET = os.environ["S3_BUCKET"]
+MODEL_KEY = "models/model.json"
 METRICS_PATH = Path("models/metrics.json")
+
+# The same number the drift check uses (DRIFT_SHARE in monitoring.py):
+# a day counts as drifted when at least half of the features drifted.
+DRIFT_THRESHOLD = 0.5
+
+# A cohort arrives every day, so a list older than this means the score
+# job stopped running. Cron does not tell you that; this page does.
+STALE_AFTER_DAYS = 2
 
 st.set_page_config(page_title="Trial conversion model", layout="wide")
 
@@ -42,6 +58,14 @@ def list_keys(prefix: str) -> list[str]:
 def read_object(key: str) -> bytes:
     s3 = boto3.client("s3")
     return s3.get_object(Bucket=BUCKET, Key=key)["Body"].read()
+
+
+@st.cache_data(ttl=300)
+def last_modified(key: str) -> datetime | None:
+    # When the object was last written, or None if it is not there.
+    s3 = boto3.client("s3")
+    found = s3.list_objects_v2(Bucket=BUCKET, Prefix=key).get("Contents", [])
+    return found[0]["LastModified"] if found else None
 
 
 # Load everything the page shows, once: the scored cohorts from predictions/
@@ -89,13 +113,23 @@ latest = pd.read_csv(io.BytesIO(read_object(scored_keys[-1]))) if scored_keys el
 
 st.title("Trial conversion model")
 
-# Status row: is the system alive, and what does it think of the world?
-# Fed by the newest scored cohort, the newest verdict, and models/metrics.json.
+# Status row: is the system alive, what does it think of the world, and
+# which model is running? Fed by the newest scored cohort, the verdicts,
+# models/metrics.json, and the model file's date in S3.
 left, middle, right = st.columns(3)
 
 if latest is not None:
-    left.metric("Latest scored cohort", f"{by_day.index[-1]:%Y-%m-%d}")
-    left.caption(f"{int(by_day['trials'].iloc[-1])} trials")
+    latest_day = by_day.index[-1]
+    # The course dates its cohorts in UTC, so the age is measured in UTC too.
+    age = (datetime.now(UTC).date() - latest_day.date()).days
+    when = {0: "today", 1: "yesterday"}.get(age, f"{age} days ago")
+    left.metric("Latest scored cohort", f"{latest_day:%Y-%m-%d}")
+    left.caption(f"{int(by_day['trials'].iloc[-1])} trials, scored {when}")
+    if age >= STALE_AFTER_DAYS:
+        left.warning(
+            f"Nothing scored since {latest_day:%Y-%m-%d}. "
+            "The score job has stopped running; check logs/cron.log on the server."
+        )
 else:
     left.metric("Latest scored cohort", "none yet")
 
@@ -108,13 +142,22 @@ if not verdicts.empty:
         f"{last['drifted_share']:.0%} of features",
         delta_color="off",
     )
+    # When drift last fired is the first thing anyone asks after "is it OK".
+    fired = verdicts.index[verdicts["drift"].eq(True)]
+    middle.caption(
+        f"last DRIFT on {fired[-1]:%Y-%m-%d}" if len(fired) else "no DRIFT so far"
+    )
 else:
     middle.metric("Latest drift verdict", "none yet")
 
 if METRICS_PATH.exists():
     metrics = json.loads(METRICS_PATH.read_text())
     right.metric("Model test AUC", f"{metrics['test_auc']:.4f}")
-    right.caption(f"trained on {metrics['n_train']} trials")
+    published = last_modified(MODEL_KEY)
+    right.caption(
+        f"trained on {metrics['n_train']} trials"
+        + (f", published {published:%Y-%m-%d}" if published else "")
+    )
 else:
     right.metric("Model test AUC", "no local model")
 
@@ -126,7 +169,7 @@ predictions_col, drift_col = st.columns(2)
 with predictions_col:
     st.subheader("Predictions over time")
     if not by_day.empty:
-        st.line_chart(by_day["mean_probability"])
+        st.line_chart(by_day["mean_probability"], y_label="conversion probability")
         st.caption(
             "Average conversion probability of each day's cohort. "
             "A move here means the model is answering differently."
@@ -137,12 +180,35 @@ with predictions_col:
 with drift_col:
     st.subheader("Drift over time")
     if not verdicts.empty:
+        days = verdicts.reset_index()
         # Bars, because the share is a count out of eight features; a line
-        # would imply something continuous.
-        st.bar_chart(verdicts["drifted_share"])
+        # would imply something continuous. A bar that crosses the dashed
+        # threshold is a day the check said DRIFT, and it turns red.
+        bars = (
+            alt.Chart(days)
+            .mark_bar()
+            .encode(
+                x=alt.X("day:T", title=None),
+                y=alt.Y(
+                    "drifted_share:Q",
+                    title="features drifted",
+                    scale=alt.Scale(domain=[0, 1]),
+                    axis=alt.Axis(format="%"),
+                ),
+                color=alt.condition(
+                    "datum.drift", alt.value("#ff4b4b"), alt.value("#83c9ff")
+                ),
+            )
+        )
+        threshold = (
+            alt.Chart(pd.DataFrame({"threshold": [DRIFT_THRESHOLD]}))
+            .mark_rule(strokeDash=[6, 4], color="#ff4b4b")
+            .encode(y="threshold:Q")
+        )
+        st.altair_chart(bars + threshold, width="stretch")
         st.caption(
             "Share of features the drift check flagged each day. "
-            "Half or more counts as drifted."
+            "Half or more counts as drifted, and that is the dashed line."
         )
     else:
         st.write("No drift reports in S3 yet. The daily drift check writes them.")
