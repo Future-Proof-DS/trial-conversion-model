@@ -43,6 +43,16 @@ docker run -p 8000:8000 trial-conversion-model
 
 `POST /predict` takes one trial's first-3-day base aggregates and returns its conversion probability plus a low/medium/high band; `GET /health` reports service status. Interactive docs live at `/docs` while the service runs.
 
+## Jobs image
+
+The two daily scripts run from `Dockerfile.jobs`, a second image the pipeline builds and pushes as `trial-conversion-model-jobs`. The server runs each job as a short-lived container, so nothing of the repo lives on the server:
+
+```
+sudo docker run --rm --network host --env-file /home/ubuntu/.env -v /home/ubuntu/data:/app/data ghcr.io/<your-username>/trial-conversion-model-jobs:latest uv run --no-sync scripts/score.py
+```
+
+The crontab uses the same line with `>> /home/ubuntu/logs/cron.log 2>&1` appended.
+
 ## Test
 
 ```
@@ -58,6 +68,14 @@ uv run scripts/check_drift.py [cohort file]
 ```
 
 This writes an HTML report (for eyes) and a JSON verdict (for machines) to `monitoring/` and to the S3 bucket, and prints OK or DRIFT. With no argument it checks the newest pulled cohort, which is the form the daily cron job uses; on a DRIFT verdict it posts an alert to the Slack webhook in `SLACK_WEBHOOK_URL`.
+
+The jobs image carries no data, so the training extract is published to the S3 bucket once, by hand:
+
+```
+uv run python -c "import boto3, os; from dotenv import load_dotenv; load_dotenv(); boto3.client('s3').upload_file('data/01_raw/trial_snapshot.csv', os.environ['S3_BUCKET'], 'data/trial_snapshot.csv')"
+```
+
+When the extract is not on disk, the drift check downloads it from there.
 
 ## Score
 
@@ -93,6 +111,7 @@ uv run streamlit run dashboard.py
 - `scripts/`: thin entry points that call into the package (`fetch_data.py` materializes the extract, `train.py` builds the training table and trains, `score.py` scores the newest cohort, `check_drift.py` runs the drift check). Production runs these; the logic stays importable and testable in `src/`. `backfill.py` is the exception: a one-time fill of dashboard history, run by hand and never on a schedule.
 - `tests/`: pytest checks for the feature logic, the API contract, and the backfill's cohort generator.
 - `monitoring.py` (in the package): the drift check; `scripts/check_drift.py` runs it against a cohort file.
+- `Dockerfile`, `Dockerfile.jobs`: the API's image and the image the two daily jobs run in. The jobs image installs the `jobs` dependency group (the drift library); the API's installs neither group.
 - `dashboard.py`: the Streamlit dashboard; a reader of what the scheduled jobs produced, never a computer of anything itself.
 - `notebooks/`: exploration only. Notebooks import from the package; no pipeline logic lives here.
 - `data/01_raw/`: the immutable extract as pulled from the database, and under `cohorts/` the day-3 cohort files pulled from the course bucket (never committed, never modified).

@@ -71,12 +71,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push the image
+      - name: Build and push both images
         run: |
           IMAGE=ghcr.io/future-proof-ds/trial-conversion-model
           docker build -t $IMAGE:latest -t $IMAGE:${{ github.sha }} .
           docker push $IMAGE:latest
           docker push $IMAGE:${{ github.sha }}
+          # The jobs image ships with every push, the same way the API's does.
+          docker build -f Dockerfile.jobs -t $IMAGE-jobs:latest -t $IMAGE-jobs:${{ github.sha }} .
+          docker push $IMAGE-jobs:latest
+          docker push $IMAGE-jobs:${{ github.sha }}
 
   deploy:
     needs: publish
@@ -92,6 +96,9 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            # Cron starts a container from this image every morning, so the
+            # pull here is what puts a pushed change into tomorrow's run.
+            sudo docker pull ghcr.io/future-proof-ds/trial-conversion-model-jobs:latest
             sudo docker pull ghcr.io/future-proof-ds/trial-conversion-model:latest
             sudo docker rm -f trial-conversion || true
             sudo docker run -d --restart unless-stopped --name trial-conversion -p 8000:8000 ghcr.io/future-proof-ds/trial-conversion-model:latest

@@ -12,6 +12,8 @@ from trial_conversion_model.data import RAW_DATA
 from trial_conversion_model.features import FEATURES, add_features
 
 REPORT_DIR = Path("monitoring")
+# The reference sits in the bucket next to models/ and predictions/.
+REFERENCE_KEY = "data/trial_snapshot.csv"
 
 # The convention the report is built with: the dataset counts as drifted
 # when at least half of the features have drifted individually.
@@ -19,7 +21,16 @@ DRIFT_SHARE = 0.5
 
 
 def load_reference(path: Path = RAW_DATA) -> pd.DataFrame:
-    """The training extract is the reference: what normal looked like."""
+    """The training extract is the reference: what normal looked like.
+
+    The jobs image carries no data, so the first run on a fresh machine
+    fetches the extract from the bucket where it was published once;
+    later runs find it on disk.
+    """
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        s3 = boto3.client("s3")
+        s3.download_file(os.environ["S3_BUCKET"], REFERENCE_KEY, str(path))
     return pd.read_csv(path)
 
 
