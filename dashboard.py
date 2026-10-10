@@ -50,8 +50,8 @@ def read_object(key: str) -> bytes:
 scored_keys = [k for k in list_keys("predictions/") if k.endswith(".csv")][-60:]
 verdict_keys = [k for k in list_keys("monitoring/") if k.endswith(".json")]
 
-# One row per scored file. The day is a real date, not text, so the chart's
-# time axis stays honest when a day is missing.
+# One row per day. Days with no file are filled in as empty rows, so a missing
+# day is a gap in the line, not a point on it.
 probabilities = [
     pd.read_csv(io.BytesIO(read_object(k)), usecols=["conversion_probability"])
     for k in scored_keys
@@ -65,8 +65,12 @@ by_day = pd.DataFrame(
         "trials": [len(p) for p in probabilities],
     }
 ).set_index("day")
+if not by_day.empty:
+    by_day = by_day.reindex(
+        pd.date_range(by_day.index.min(), by_day.index.max(), name="day")
+    )
 
-# One row per drift verdict, dated the same way.
+# One row per day for the drift verdicts too, with the same gaps.
 verdicts = pd.DataFrame(
     [json.loads(read_object(k)) for k in verdict_keys],
     columns=["drifted_share", "drift"],
@@ -75,6 +79,10 @@ verdicts["day"] = pd.to_datetime(
     [Path(k).stem.removeprefix("drift_cohort_") for k in verdict_keys]
 )
 verdicts = verdicts.set_index("day")
+if not verdicts.empty:
+    verdicts = verdicts.reindex(
+        pd.date_range(verdicts.index.min(), verdicts.index.max(), name="day")
+    )
 
 # The newest scored cohort in full, for the section at the bottom.
 latest = pd.read_csv(io.BytesIO(read_object(scored_keys[-1]))) if scored_keys else None
@@ -87,7 +95,7 @@ left, middle, right = st.columns(3)
 
 if latest is not None:
     left.metric("Latest scored cohort", f"{by_day.index[-1]:%Y-%m-%d}")
-    left.caption(f"{by_day['trials'].iloc[-1]} trials")
+    left.caption(f"{int(by_day['trials'].iloc[-1])} trials")
 else:
     left.metric("Latest scored cohort", "none yet")
 
@@ -95,7 +103,10 @@ if not verdicts.empty:
     last = verdicts.iloc[-1]
     label = "DRIFT" if last["drift"] else "OK"
     middle.metric(
-        "Latest drift verdict", label, f"{last['drifted_share']:.0%} of features"
+        "Latest drift verdict",
+        label,
+        f"{last['drifted_share']:.0%} of features",
+        delta_color="off",
     )
 else:
     middle.metric("Latest drift verdict", "none yet")
@@ -142,8 +153,12 @@ st.divider()
 # team receives it, least likely to convert first.
 st.subheader("Latest cohort")
 if latest is not None:
+    # Bins are intervals, which the chart prints as raw JSON; label each by
+    # its left edge instead.
+    counts = latest["conversion_probability"].value_counts(bins=20, sort=False)
+    counts.index = [f"{b.left:.2f}" for b in counts.index]
     st.bar_chart(
-        latest["conversion_probability"].value_counts(bins=20, sort=False),
+        counts,
         x_label="conversion probability",
         y_label="trials",
     )
