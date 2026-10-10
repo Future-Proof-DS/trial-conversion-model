@@ -13,7 +13,7 @@ schedule.
 import json
 import os
 import re
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 import boto3
 import numpy as np
@@ -28,6 +28,7 @@ COHORT_SIZE = 120
 # The model has eight features; a drift share is a count out of eight.
 FEATURE_COUNT = 8
 SCORED_KEY = re.compile(r"^predictions/scored_(\d{4}-\d{2}-\d{2})\.csv$")
+VERDICT_KEY = re.compile(r"^monitoring/drift_cohort_(\d{4}-\d{2}-\d{2})\.json$")
 
 # The course's own cohort generator, copied here so this script needs
 # nothing from outside this repo. The two copies must stay identical.
@@ -119,6 +120,30 @@ def list_keys(s3, bucket: str, prefix: str) -> set[str]:
     return keys
 
 
+def days_to_fill(existing: set[str], today: date) -> list[date]:
+    """The days to fill: the past month, up to the day before the first real run."""
+    # Stop the day before the first real run. A day the student scored or
+    # checked themselves may already show drift, and clean history after a
+    # drifted day would read as drift that came and went. Week 5 leaves real
+    # verdicts in the bucket, one of them drifted, so a real verdict stops the
+    # fill the same way a real scored file does. The days between the first
+    # real run and today stay empty, which is the truth.
+    first = today - timedelta(days=DAYS)
+    last = today - timedelta(days=1)
+    real_days = [
+        date.fromisoformat(m.group(1))
+        for key in existing
+        for m in [SCORED_KEY.match(key) or VERDICT_KEY.match(key)]
+        if m
+    ]
+    # Only real days inside the window count; an older Week 5 verdict must
+    # not cancel the whole fill.
+    real_days = [day for day in real_days if first <= day <= last]
+    if real_days:
+        last = min(real_days) - timedelta(days=1)
+    return [first + timedelta(days=i) for i in range((last - first).days + 1)]
+
+
 def main() -> None:
     load_dotenv()
     bucket = os.environ["S3_BUCKET"]
@@ -132,24 +157,10 @@ def main() -> None:
     existing = list_keys(s3, bucket, "predictions/") | list_keys(
         s3, bucket, "monitoring/"
     )
-    real_days = [
-        datetime.fromisoformat(m.group(1)).date()
-        for m in (SCORED_KEY.match(key) for key in existing)
-        if m
-    ]
-
-    # Stop the day before the first real run. A day the student scored
-    # themselves may already show drift, and clean history after a drifted
-    # day would read as drift that came and went. The days between their
-    # first real run and today stay empty, which is the truth.
-    first = today - timedelta(days=DAYS)
-    last = (
-        min(real_days) - timedelta(days=1) if real_days else today - timedelta(days=1)
-    )
+    days = days_to_fill(existing, today)
 
     written = 0
-    for offset in range((last - first).days + 1):
-        day = first + timedelta(days=offset)
+    for day in days:
         scored_key = f"predictions/scored_{day:%Y-%m-%d}.csv"
         verdict_key = f"monitoring/drift_cohort_{day:%Y-%m-%d}.json"
         if scored_key in existing and verdict_key in existing:
@@ -177,7 +188,7 @@ def main() -> None:
         written += 1
 
     if written:
-        print(f"Backfilled {written} days between {first} and {last}.")
+        print(f"Backfilled {written} days between {days[0]} and {days[-1]}.")
     else:
         print("Nothing to fill: the bucket already has history for the past month.")
 

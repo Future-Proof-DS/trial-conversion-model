@@ -1,7 +1,7 @@
 # The course generator takes a naive datetime at midnight, so these do too.
 # ruff: noqa: DTZ001
 import importlib.util
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -54,3 +54,27 @@ def test_verdict_is_clean_and_marked_as_backfill():
     assert verdict["drifted_share"] in {0.0, 0.125, 0.25}
     assert verdict["source"] == "backfill"
     assert verdict["name"] == "drift_cohort_2026-09-20"
+
+
+def test_empty_bucket_fills_the_whole_month():
+    days = backfill.days_to_fill(set(), date(2026, 10, 18))
+    assert len(days) == 30
+    assert days[0] == date(2026, 9, 18)
+    assert days[-1] == date(2026, 10, 17)
+
+
+def test_real_verdict_in_the_window_stops_the_fill():
+    existing = {
+        "predictions/scored_2026-10-17.csv",
+        "monitoring/drift_cohort_2026-09-13.json",
+        "monitoring/drift_cohort_2026-10-10.json",
+    }
+    days = backfill.days_to_fill(existing, date(2026, 10, 18))
+    assert days[0] == date(2026, 9, 18)
+    assert days[-1] == date(2026, 10, 9)
+    assert len(days) == 22
+
+
+def test_real_day_at_the_window_start_leaves_nothing_to_fill():
+    existing = {"predictions/scored_2026-09-18.csv"}
+    assert backfill.days_to_fill(existing, date(2026, 10, 18)) == []
