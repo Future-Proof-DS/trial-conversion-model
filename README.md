@@ -81,7 +81,7 @@ It generates the cohorts itself and reads nothing from the course bucket. It is 
 
 ## Dashboard
 
-One screen for the whole system, read from S3: the latest scored cohort and how fresh it is, the latest drift verdict and when drift last fired, the model's metrics and when it was published, and how the predictions and the drift check moved over the past month or two. A list older than two days gets a warning on the page, because cron will not tell you the job stopped.
+One screen for the whole system, read from S3: the latest scored cohort and how fresh it is, the latest drift verdict, the model's metrics and when it was published, and how the predictions and the drift check moved over the past month or two. A list older than two days gets a warning on the page, because cron will not tell you the job stopped.
 
 ```
 uv run streamlit run dashboard.py

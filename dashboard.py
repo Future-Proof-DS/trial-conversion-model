@@ -124,9 +124,8 @@ st.title("Trial conversion model")
 # models/metrics.json, and the model file's date in S3.
 left, middle, right = st.columns(3)
 
-# Every tile has the same shape, label, value, pill, caption, so the row
-# lines up. The pill is a metric "delta" with its colour switched off: these
-# are facts, not trends, so no colour and no arrow.
+# Every tile is a value and one pill. The pill is a metric "delta" with its
+# colour and arrow switched off: these are facts, not trends.
 if latest is not None:
     latest_day = by_day.index[-1]
     # The course dates its cohorts in UTC, so the age is measured in UTC too.
@@ -135,11 +134,10 @@ if latest is not None:
     left.metric(
         "Latest scored cohort",
         f"{latest_day:%Y-%m-%d}",
-        f"scored {when}",
+        f"{int(by_day['trials'].iloc[-1])} trials, scored {when}",
         delta_color="off",
         delta_arrow="off",
     )
-    left.caption(f"{int(by_day['trials'].iloc[-1])} trials in the ranked list")
     if age >= STALE_AFTER_DAYS:
         left.warning(
             f"Nothing scored since {latest_day:%Y-%m-%d}. "
@@ -157,13 +155,6 @@ if not verdicts.empty:
         delta_color="off",
         delta_arrow="off",
     )
-    # When drift last fired is the first thing anyone asks after "is it OK".
-    fired = verdicts.index[verdicts["drift"].eq(True)]
-    middle.caption(
-        f"last DRIFT on {fired[-1]:%Y-%m-%d}"
-        if len(fired)
-        else f"no DRIFT in the last {len(verdicts)} days"
-    )
 else:
     middle.metric("Latest drift verdict", "none yet")
 
@@ -177,7 +168,6 @@ if METRICS_PATH.exists():
         delta_color="off",
         delta_arrow="off",
     )
-    right.caption(f"trained on {metrics['n_train']} trials")
 else:
     right.metric("Model test AUC", "no local model")
 
