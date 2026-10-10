@@ -29,6 +29,7 @@ COHORT_SIZE = 120
 FEATURE_COUNT = 8
 SCORED_KEY = re.compile(r"^predictions/scored_(\d{4}-\d{2}-\d{2})\.csv$")
 VERDICT_KEY = re.compile(r"^monitoring/drift_cohort_(\d{4}-\d{2}-\d{2})\.json$")
+REPORT_KEY = re.compile(r"^monitoring/drift_cohort_(\d{4}-\d{2}-\d{2})\.html$")
 
 # The course's own cohort generator, copied here so this script needs
 # nothing from outside this repo. The two copies must stay identical.
@@ -120,25 +121,30 @@ def list_keys(s3, bucket: str, prefix: str) -> set[str]:
     return keys
 
 
+def key_dates(keys: set[str], pattern: re.Pattern) -> set[date]:
+    """The dates in the keys that match one of the patterns above."""
+    return {date.fromisoformat(m.group(1)) for m in map(pattern.match, keys) if m}
+
+
 def days_to_fill(existing: set[str], today: date) -> list[date]:
     """The days to fill: the past month, up to the day before the first real run."""
-    # Stop the day before the first real run. A day the student scored or
-    # checked themselves may already show drift, and clean history after a
-    # drifted day would read as drift that came and went. Week 5 leaves real
-    # verdicts in the bucket, one of them drifted, so a real verdict stops the
-    # fill the same way a real scored file does. The days between the first
-    # real run and today stay empty, which is the truth.
+    # The backfill tells its own days from real ones by key names alone. The
+    # real drift check always leaves an HTML report beside its verdict, and
+    # this script never writes one; a day scored by hand but never checked
+    # has a scored file and no verdict, while a backfilled day has both.
+    # A real day may already show drift, and clean history after a drifted
+    # day would read as drift that came and went, so the fill stops the day
+    # before the first real one. The days between the first real run and
+    # today stay empty on purpose, which is the truth.
     first = today - timedelta(days=DAYS)
     last = today - timedelta(days=1)
-    real_days = [
-        date.fromisoformat(m.group(1))
-        for key in existing
-        for m in [SCORED_KEY.match(key) or VERDICT_KEY.match(key)]
-        if m
-    ]
-    # Only real days inside the window count; an older Week 5 verdict must
+    checked = key_dates(existing, REPORT_KEY)
+    scored_unchecked = key_dates(existing, SCORED_KEY) - key_dates(
+        existing, VERDICT_KEY
+    )
+    # Only real days inside the window count; an older Week 5 report must
     # not cancel the whole fill.
-    real_days = [day for day in real_days if first <= day <= last]
+    real_days = [day for day in checked | scored_unchecked if first <= day <= last]
     if real_days:
         last = min(real_days) - timedelta(days=1)
     return [first + timedelta(days=i) for i in range((last - first).days + 1)]
@@ -159,15 +165,24 @@ def main() -> None:
     )
     days = days_to_fill(existing, today)
 
-    written = 0
+    written = []
     for day in days:
         scored_key = f"predictions/scored_{day:%Y-%m-%d}.csv"
         verdict_key = f"monitoring/drift_cohort_{day:%Y-%m-%d}.json"
         if scored_key in existing and verdict_key in existing:
             continue
 
-        # The two writes are independent, so a rerun repairs a half-written day.
+        # The verdict goes first: a crash between the two writes leaves a
+        # verdict with no scored file and no report, which still reads as a
+        # backfill day, so a rerun reaches it and writes only the missing file.
         day_start = datetime.combine(day, time())
+        if verdict_key not in existing:
+            s3.put_object(
+                Bucket=bucket,
+                Key=verdict_key,
+                Body=json.dumps(ok_verdict(day_start)).encode(),
+                ContentType="application/json",
+            )
         cohort = make_cohort(day_start, COHORT_SIZE, drift=False)
         scored = score(model, cohort)
         if scored_key not in existing:
@@ -177,18 +192,13 @@ def main() -> None:
                 Body=scored.to_csv(index=False).encode(),
                 ContentType="text/csv",
             )
-        if verdict_key not in existing:
-            s3.put_object(
-                Bucket=bucket,
-                Key=verdict_key,
-                Body=json.dumps(ok_verdict(day_start)).encode(),
-                ContentType="application/json",
-            )
         print(f"{day}: {len(scored)} trials scored, verdict OK")
-        written += 1
+        written.append(day)
 
-    if written:
-        print(f"Backfilled {written} days between {days[0]} and {days[-1]}.")
+    if len(written) == 1:
+        print(f"Backfilled 1 day: {written[0]}.")
+    elif written:
+        print(f"Backfilled {len(written)} days from {written[0]} to {written[-1]}.")
     else:
         print("Nothing to fill: the bucket already has history for the past month.")
 
