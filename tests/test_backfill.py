@@ -1,7 +1,7 @@
 # The course generator takes a naive datetime at midnight, so these do too.
 # ruff: noqa: DTZ001
 import importlib.util
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -54,49 +54,3 @@ def test_verdict_is_clean_and_marked_as_backfill():
     assert verdict["drifted_share"] in {0.0, 0.125, 0.25}
     assert verdict["source"] == "backfill"
     assert verdict["name"] == "drift_cohort_2026-09-20"
-
-
-def test_empty_bucket_fills_the_whole_month():
-    days = backfill.days_to_fill(set(), date(2026, 10, 18))
-    assert len(days) == 30
-    assert days[0] == date(2026, 9, 18)
-    assert days[-1] == date(2026, 10, 17)
-
-
-def test_week5_verdicts_are_real():
-    existing = {
-        "predictions/scored_2026-10-17.csv",
-        "monitoring/drift_cohort_2026-09-13.json",
-        "monitoring/drift_cohort_2026-09-13.html",
-        "monitoring/drift_cohort_2026-10-10.json",
-        "monitoring/drift_cohort_2026-10-10.html",
-    }
-    days = backfill.days_to_fill(existing, date(2026, 10, 18))
-    assert days[0] == date(2026, 9, 18)
-    assert days[-1] == date(2026, 10, 9)
-    assert len(days) == 22
-
-
-def test_real_day_at_the_window_start_leaves_nothing_to_fill():
-    existing = {"predictions/scored_2026-09-18.csv"}
-    assert backfill.days_to_fill(existing, date(2026, 10, 18)) == []
-
-
-def test_rerun_sees_its_own_days_as_fillable():
-    filled = [date(2026, 9, 18) + timedelta(days=i) for i in range(22)]
-    existing = {f"predictions/scored_{d}.csv" for d in filled}
-    existing |= {f"monitoring/drift_cohort_{d}.json" for d in filled}
-    existing |= {
-        "predictions/scored_2026-10-17.csv",
-        "monitoring/drift_cohort_2026-10-10.json",
-        "monitoring/drift_cohort_2026-10-10.html",
-    }
-    assert backfill.days_to_fill(existing, date(2026, 10, 18)) == filled
-
-
-def test_half_written_day_is_reached():
-    existing = {"monitoring/drift_cohort_2026-09-20.json"}
-    days = backfill.days_to_fill(existing, date(2026, 10, 18))
-    assert len(days) == 30
-    assert days[0] == date(2026, 9, 18)
-    assert days[-1] == date(2026, 10, 17)

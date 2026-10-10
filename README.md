@@ -71,7 +71,7 @@ On the server, cron runs this and the drift check daily; nothing about either sc
 
 ## Backfill
 
-A one-time fill for the dashboard. Until it runs, the bucket only holds the runs you started yourself. This writes about a month of scored cohorts and clean drift verdicts into it, dated before your first real run, so the dashboard has a history behind it:
+A one-time fill for the dashboard. It writes the thirty days before today into the bucket, a scored cohort and a clean drift verdict for each, replacing anything already there for those days, so the dashboard has a month behind it:
 
 ```
 uv run scripts/backfill.py

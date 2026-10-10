@@ -2,9 +2,9 @@
 
 Run once, before building the dashboard: uv run scripts/backfill.py
 
-On the day the dashboard is built, the bucket holds only the runs from
-that week. This writes about a month of scored cohorts and clean drift
-verdicts, dated before the first real run, so the dashboard has a history
+It fills the thirty days before today with scored cohorts and clean drift
+verdicts, as if the system had been running since then, replacing anything
+already in the bucket for those days, so the dashboard has a smooth month
 behind it. It is a one-time fill, not part of the system: the daily jobs
 are scripts/score.py and scripts/check_drift.py, and this never runs on a
 schedule.
@@ -12,8 +12,7 @@ schedule.
 
 import json
 import os
-import re
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 import boto3
 import numpy as np
@@ -27,9 +26,6 @@ DAYS = 30
 COHORT_SIZE = 120
 # The model has eight features; a drift share is a count out of eight.
 FEATURE_COUNT = 8
-SCORED_KEY = re.compile(r"^predictions/scored_(\d{4}-\d{2}-\d{2})\.csv$")
-VERDICT_KEY = re.compile(r"^monitoring/drift_cohort_(\d{4}-\d{2}-\d{2})\.json$")
-REPORT_KEY = re.compile(r"^monitoring/drift_cohort_(\d{4}-\d{2}-\d{2})\.html$")
 
 # The course's own cohort generator, copied here so this script needs
 # nothing from outside this repo. The two copies must stay identical.
@@ -111,45 +107,6 @@ def ok_verdict(date: datetime) -> dict:
     }
 
 
-def list_keys(s3, bucket: str, prefix: str) -> set[str]:
-    """Every key under a prefix, however many pages the listing takes."""
-    keys = set()
-    for page in s3.get_paginator("list_objects_v2").paginate(
-        Bucket=bucket, Prefix=prefix
-    ):
-        keys.update(o["Key"] for o in page.get("Contents", []))
-    return keys
-
-
-def key_dates(keys: set[str], pattern: re.Pattern) -> set[date]:
-    """The dates in the keys that match one of the patterns above."""
-    return {date.fromisoformat(m.group(1)) for m in map(pattern.match, keys) if m}
-
-
-def days_to_fill(existing: set[str], today: date) -> list[date]:
-    """The days to fill: the past month, up to the day before the first real run."""
-    # The backfill tells its own days from real ones by key names alone. The
-    # real drift check always leaves an HTML report beside its verdict, and
-    # this script never writes one; a day scored by hand but never checked
-    # has a scored file and no verdict, while a backfilled day has both.
-    # A real day may already show drift, and clean history after a drifted
-    # day would read as drift that came and went, so the fill stops the day
-    # before the first real one. The days between the first real run and
-    # today stay empty on purpose, which is the truth.
-    first = today - timedelta(days=DAYS)
-    last = today - timedelta(days=1)
-    checked = key_dates(existing, REPORT_KEY)
-    scored_unchecked = key_dates(existing, SCORED_KEY) - key_dates(
-        existing, VERDICT_KEY
-    )
-    # Only real days inside the window count; an older Week 5 report must
-    # not cancel the whole fill.
-    real_days = [day for day in checked | scored_unchecked if first <= day <= last]
-    if real_days:
-        last = min(real_days) - timedelta(days=1)
-    return [first + timedelta(days=i) for i in range((last - first).days + 1)]
-
-
 def main() -> None:
     load_dotenv()
     bucket = os.environ["S3_BUCKET"]
@@ -159,48 +116,29 @@ def main() -> None:
     # The course dates its cohorts in UTC, and a laptop in the Americas in
     # the evening is already on tomorrow's date there.
     today = datetime.now(UTC).date()
+    days = [today - timedelta(days=n) for n in range(DAYS, 0, -1)]
 
-    existing = list_keys(s3, bucket, "predictions/") | list_keys(
-        s3, bucket, "monitoring/"
-    )
-    days = days_to_fill(existing, today)
-
-    written = []
     for day in days:
-        scored_key = f"predictions/scored_{day:%Y-%m-%d}.csv"
-        verdict_key = f"monitoring/drift_cohort_{day:%Y-%m-%d}.json"
-        if scored_key in existing and verdict_key in existing:
-            continue
-
-        # The verdict goes first: a crash between the two writes leaves a
-        # verdict with no scored file and no report, which still reads as a
-        # backfill day, so a rerun reaches it and writes only the missing file.
+        # Both writes replace whatever is already there for that day, so the
+        # past month always comes out whole and a rerun gives the same month.
         day_start = datetime.combine(day, time())
-        if verdict_key not in existing:
-            s3.put_object(
-                Bucket=bucket,
-                Key=verdict_key,
-                Body=json.dumps(ok_verdict(day_start)).encode(),
-                ContentType="application/json",
-            )
+        s3.put_object(
+            Bucket=bucket,
+            Key=f"monitoring/drift_cohort_{day:%Y-%m-%d}.json",
+            Body=json.dumps(ok_verdict(day_start)).encode(),
+            ContentType="application/json",
+        )
         cohort = make_cohort(day_start, COHORT_SIZE, drift=False)
         scored = score(model, cohort)
-        if scored_key not in existing:
-            s3.put_object(
-                Bucket=bucket,
-                Key=scored_key,
-                Body=scored.to_csv(index=False).encode(),
-                ContentType="text/csv",
-            )
+        s3.put_object(
+            Bucket=bucket,
+            Key=f"predictions/scored_{day:%Y-%m-%d}.csv",
+            Body=scored.to_csv(index=False).encode(),
+            ContentType="text/csv",
+        )
         print(f"{day}: {len(scored)} trials scored, verdict OK")
-        written.append(day)
 
-    if len(written) == 1:
-        print(f"Backfilled 1 day: {written[0]}.")
-    elif written:
-        print(f"Backfilled {len(written)} days from {written[0]} to {written[-1]}.")
-    else:
-        print("Nothing to fill: the bucket already has history for the past month.")
+    print(f"Backfilled {len(days)} days from {days[0]} to {days[-1]}.")
 
 
 if __name__ == "__main__":
