@@ -45,7 +45,7 @@ docker run -p 8000:8000 trial-conversion-model
 
 ## Jobs image
 
-The two daily scripts run from `Dockerfile.jobs`, a second image the pipeline builds and pushes as `trial-conversion-model-jobs`. The server runs each job as a short-lived container, so nothing of the repo lives on the server:
+The two daily scripts run from `Dockerfile.jobs`, a second image the pipeline builds and pushes as `trial-conversion-model-jobs`. It installs the project with its dev group, so the drift library comes along. The server runs each job as a short-lived container, so nothing of the repo lives on the server:
 
 ```
 sudo docker run --rm --network host --env-file /home/ubuntu/.env -v /home/ubuntu/data:/app/data ghcr.io/<your-username>/trial-conversion-model-jobs:latest uv run --no-sync scripts/score.py
@@ -111,7 +111,7 @@ uv run streamlit run dashboard.py
 - `scripts/`: thin entry points that call into the package (`fetch_data.py` materializes the extract, `train.py` builds the training table and trains, `score.py` scores the newest cohort, `check_drift.py` runs the drift check). Production runs these; the logic stays importable and testable in `src/`. `backfill.py` is the exception: a one-time fill of dashboard history, run by hand and never on a schedule.
 - `tests/`: pytest checks for the feature logic, the API contract, and the backfill's cohort generator.
 - `monitoring.py` (in the package): the drift check; `scripts/check_drift.py` runs it against a cohort file.
-- `Dockerfile`, `Dockerfile.jobs`: the API's image and the image the two daily jobs run in. The jobs image installs the `jobs` dependency group (the drift library); the API's installs neither group.
+- `Dockerfile`, `Dockerfile.jobs`: the API's image and the image the two daily jobs run in. The jobs image installs the project with its dev group, so the drift library comes along; the API's leaves the dev group out.
 - `dashboard.py`: the Streamlit dashboard; a reader of what the scheduled jobs produced, never a computer of anything itself.
 - `notebooks/`: exploration only. Notebooks import from the package; no pipeline logic lives here.
 - `data/01_raw/`: the immutable extract as pulled from the database, and under `cohorts/` the day-3 cohort files pulled from the course bucket (never committed, never modified).

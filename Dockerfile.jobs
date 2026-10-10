@@ -1,5 +1,5 @@
 # The image the two scheduled jobs run in. It is separate from the API's
-# image so the service stays lean and the jobs can carry the drift library.
+# image so the service stays lean.
 # It holds code and the model, never data: the data arrives from the
 # bucket at run time. Cron names the script to run.
 FROM python:3.11-slim
@@ -13,13 +13,14 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
 
 # Dependencies first, so code changes do not re-install the world.
-# The jobs group adds the drift library; the dev tools stay out.
+# The dev group comes along because the drift library lives there,
+# which is cheaper than a group of its own.
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --group jobs --no-install-project
+RUN uv sync --frozen --no-install-project
 
 COPY src/ src/
 COPY scripts/ scripts/
-RUN uv sync --frozen --no-dev --group jobs
+RUN uv sync --frozen
 
 # The model artifact ships inside the image; the scoring script loads it,
 # and the jobs never train

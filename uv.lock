@@ -4720,10 +4720,6 @@ dev = [
     { name = "ruff" },
     { name = "streamlit" },
 ]
-jobs = [
-    { name = "evidently" },
-    { name = "nltk" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -4750,10 +4746,6 @@ dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.13.0" },
     { name = "streamlit", specifier = ">=1.62.0" },
-]
-jobs = [
-    { name = "evidently", specifier = ">=0.7.21" },
-    { name = "nltk", specifier = "<3.10" },
 ]
 
 [[package]]
