@@ -24,11 +24,18 @@ METRICS_PATH = Path("models/metrics.json")
 st.set_page_config(page_title="Trial conversion model", layout="wide")
 
 
+# Reading from S3. Cached for five minutes so the page does not re-download
+# every file each time it redraws.
 @st.cache_data(ttl=300)
 def list_keys(prefix: str) -> list[str]:
+    # A paginator, because a single listing silently stops at 1000 keys.
     s3 = boto3.client("s3")
-    listing = s3.list_objects_v2(Bucket=BUCKET, Prefix=prefix)
-    return sorted(o["Key"] for o in listing.get("Contents", []))
+    keys = []
+    for page in s3.get_paginator("list_objects_v2").paginate(
+        Bucket=BUCKET, Prefix=prefix
+    ):
+        keys += [o["Key"] for o in page.get("Contents", [])]
+    return sorted(keys)
 
 
 @st.cache_data(ttl=300)
@@ -37,28 +44,58 @@ def read_object(key: str) -> bytes:
     return s3.get_object(Bucket=BUCKET, Key=key)["Body"].read()
 
 
-st.title("Trial conversion model")
-
-prediction_keys = [k for k in list_keys("predictions/") if k.endswith(".csv")]
+# Load everything the page shows, once: the scored cohorts from predictions/
+# and the drift verdicts from monitoring/.
+# A month or two is what the charts need, and the bucket only grows.
+scored_keys = [k for k in list_keys("predictions/") if k.endswith(".csv")][-60:]
 verdict_keys = [k for k in list_keys("monitoring/") if k.endswith(".json")]
 
+# One row per scored file. The day is a real date, not text, so the chart's
+# time axis stays honest when a day is missing.
+probabilities = [
+    pd.read_csv(io.BytesIO(read_object(k)), usecols=["conversion_probability"])
+    for k in scored_keys
+]
+by_day = pd.DataFrame(
+    {
+        "day": pd.to_datetime(
+            [Path(k).stem.removeprefix("scored_") for k in scored_keys]
+        ),
+        "mean_probability": [p["conversion_probability"].mean() for p in probabilities],
+        "trials": [len(p) for p in probabilities],
+    }
+).set_index("day")
+
+# One row per drift verdict, dated the same way.
+verdicts = pd.DataFrame(
+    [json.loads(read_object(k)) for k in verdict_keys],
+    columns=["drifted_share", "drift"],
+)
+verdicts["day"] = pd.to_datetime(
+    [Path(k).stem.removeprefix("drift_cohort_") for k in verdict_keys]
+)
+verdicts = verdicts.set_index("day")
+
+# The newest scored cohort in full, for the section at the bottom.
+latest = pd.read_csv(io.BytesIO(read_object(scored_keys[-1]))) if scored_keys else None
+
+st.title("Trial conversion model")
+
 # Status row: is the system alive, and what does it think of the world?
+# Fed by the newest scored cohort, the newest verdict, and models/metrics.json.
 left, middle, right = st.columns(3)
 
-if prediction_keys:
-    latest_key = prediction_keys[-1]
-    scored = pd.read_csv(io.BytesIO(read_object(latest_key)))
-    left.metric("Latest scored cohort", Path(latest_key).stem.removeprefix("scored_"))
-    left.caption(f"{len(scored)} trials")
+if latest is not None:
+    left.metric("Latest scored cohort", f"{by_day.index[-1]:%Y-%m-%d}")
+    left.caption(f"{by_day['trials'].iloc[-1]} trials")
 else:
-    scored = None
     left.metric("Latest scored cohort", "none yet")
 
-if verdict_keys:
-    verdict = json.loads(read_object(verdict_keys[-1]))
-    label = "DRIFT" if verdict["drift"] else "OK"
+if not verdicts.empty:
+    last = verdicts.iloc[-1]
+    label = "DRIFT" if last["drift"] else "OK"
     middle.metric(
-        "Latest drift verdict", label, f"{verdict['drifted_share']:.0%} of features"
+        "Latest drift verdict", label, f"{last['drifted_share']:.0%} of features"
     )
 else:
     middle.metric("Latest drift verdict", "none yet")
@@ -72,33 +109,50 @@ else:
 
 st.divider()
 
+# Over time: one point per scored cohort, one bar per drift verdict.
 predictions_col, drift_col = st.columns(2)
 
 with predictions_col:
-    st.subheader("Latest predictions")
-    if scored is not None:
-        st.bar_chart(
-            scored["conversion_probability"].value_counts(bins=20, sort=False),
-            x_label="conversion probability",
-            y_label="trials",
-        )
-        st.caption("Top of the ranked list")
-        st.dataframe(
-            scored.head(10)[
-                ["trial_id", "country", "device_type", "conversion_probability"]
-            ],
-            hide_index=True,
+    st.subheader("Predictions over time")
+    if not by_day.empty:
+        st.line_chart(by_day["mean_probability"])
+        st.caption(
+            "Average conversion probability of each day's cohort. "
+            "A move here means the model is answering differently."
         )
     else:
         st.write("No scored cohorts in S3 yet. The daily score job writes them.")
 
 with drift_col:
-    st.subheader("Drift history")
-    if verdict_keys:
-        history = pd.DataFrame(
-            [json.loads(read_object(k)) for k in verdict_keys]
-        ).assign(report=[Path(k).stem for k in verdict_keys])
-        history["verdict"] = history["drift"].map({True: "DRIFT", False: "OK"})
-        st.dataframe(history[["report", "drifted_share", "verdict"]], hide_index=True)
+    st.subheader("Drift over time")
+    if not verdicts.empty:
+        # Bars, because the share is a count out of eight features; a line
+        # would imply something continuous.
+        st.bar_chart(verdicts["drifted_share"])
+        st.caption(
+            "Share of features the drift check flagged each day. "
+            "Half or more counts as drifted."
+        )
     else:
         st.write("No drift reports in S3 yet. The daily drift check writes them.")
+
+st.divider()
+
+# Latest cohort: the newest scored file from predictions/, as the lifecycle
+# team receives it, least likely to convert first.
+st.subheader("Latest cohort")
+if latest is not None:
+    st.bar_chart(
+        latest["conversion_probability"].value_counts(bins=20, sort=False),
+        x_label="conversion probability",
+        y_label="trials",
+    )
+    st.caption("Top of the ranked list")
+    st.dataframe(
+        latest.head(10)[
+            ["trial_id", "country", "device_type", "conversion_probability"]
+        ],
+        hide_index=True,
+    )
+else:
+    st.write("No scored cohorts in S3 yet. The daily score job writes them.")

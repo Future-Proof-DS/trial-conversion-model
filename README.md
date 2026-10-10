@@ -81,7 +81,7 @@ It generates the cohorts itself and reads nothing from the course bucket. It is 
 
 ## Dashboard
 
-One screen for the whole system, read from S3: the latest scored cohort, the latest drift verdict, and the model's metrics.
+One screen for the whole system, read from S3: the latest scored cohort, the latest drift verdict, the model's metrics, and how the predictions and the drift check moved over the past month or two.
 
 ```
 uv run streamlit run dashboard.py
